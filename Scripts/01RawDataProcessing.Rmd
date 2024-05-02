@@ -1,0 +1,396 @@
+---
+title: "Raw FASTQ data to read count tables"
+author: "Jule Freudenthal"
+date: "`r Sys.Date()`" 
+output: github_document
+always_allow_html: yes
+---
+```{r setup, include=FALSE}
+# Install packages
+if (!require("knitr")) install.packages("knitr")
+if (!require("rprojroot")) install.packages("rprojroot")
+
+# Set global options
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set global working directory
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+Here we show our workflow for creating count tables from raw Illumina data (paired-end sequences, 150bp) originating from 15 canopy bark samples of the Leipzig floodplain forest. The raw data will soon be available under NCBI BioProject PRJNA1105877.
+
+## 01 Adapter trimming and quality filtering  
+
+First, we trimmed the remaining adapters and filtered for low-quality sequences using [FastP](https://github.com/OpenGene/fastp) v. 0.23.2. 
+
+```{bash, eval=F}
+#!/bin/bash -l
+# Define sample name, names of read 1 and read 2
+SampleName=NameOfSample
+Read1="$SampleName"_R1.fastq.gz
+Read2="$SampleName"_R2.fastq.gz
+
+# Define your working, input and output directory 
+InputDir=/path/to/input/directory/NameOfInputDirectory
+OutputDir=/path/to/output/directory/NameOfOutputDirectory
+
+#---------------------------------------- Test requirements and create necessary files/folders
+# Check if the input directory exists
+if test ! -d "$InputDir"; then
+    echo -e "Error: The input directory ($InputDir) is not found, proccessed stopped."
+    exit 1
+fi
+
+# Test if original data (Read1 & Read2) exists in input dir
+if test ! -f "$InputDir"/"$Read1"; then
+    echo -e "Error: The file for read 1 ("$Read1") is not found in the input directory ($InputDir), " \
+            "proccessed stopped." 
+    exit 1
+fi
+if test ! -f "$InputDir"/"$Read2"; then
+    echo -e "Error: The file for read 2 ("$Read2") is not found in the input directory ($InputDir), " \ 
+            "proccessed stopped." 
+    exit 1
+fi
+
+#-------------------------------------------------------------------------- 1st trimming round
+# Create and move to a temporary output directory as the html file it is saved in the current directory
+mkdir "$OutputDir"/"$SampleName"
+cd "$OutputDir"/"$SampleName"
+
+# Run fastp: trim the adapters, exclude low complexity sites, filter by Ns & low quality scores
+/home/jfreude2/Tools/FastP/fastp \
+--in1 "$InputDir"/"$Read1" --in2 "$InputDir"/"$Read2" \
+--out1 "$OutputDir"/"$SampleName"_FastP1_R1.fastq.gz --out2 "$OutputDir"/"$SampleName"_FastP1_R2.fastq.gz \
+-A -L -q 10 -u 0 -n 0 -y \
+--thread 4 --dont_overwrite || exit 1
+
+# Rename and move the html file, delete the json file
+mv fastp.html "$OutputDir"/"$SampleName"_FastP1.html
+mv fastp.json "$OutputDir"/"$SampleName"_FastP1.json
+
+# Get the number of reads of the original reads
+R1=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP1.json | sed '3!d')
+R2=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP1.json | sed '4!d')
+if [ "$R1" = "$R2" ]; then
+    Nr=$(echo "$R1" | tr -d -c 0-9)
+    echo -e "Original $Nr" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+else
+    echo -e "Error: The original Read 1 & 2 have different number of reads, process stopped."
+    exit 1
+fi
+
+# Get the number of reads of the first trimmed reads
+R1=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP1.json | sed '5!d')
+R2=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP1.json | sed '6!d')
+if [ "$R1" = "$R2" ]; then
+    Nr=$(echo "$R1" | tr -d -c 0-9)
+    echo -e "Trimmed1 $Nr" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+else
+    echo -e "Error: The trimmed1 Read 1 & 2 have different number of reads, process stopped."
+    exit 1
+fi
+
+#-------------------------------------------------------------------------- 2nd trimming round
+# Run fastp:filter for read pairs with more that 10% low quality bases (<25)
+/home/jfreude2/Tools/FastP/fastp \
+--in1 "$OutputDir"/"$SampleName"_FastP1_R1.fastq.gz --in2 "$OutputDir"/"$SampleName"_FastP1_R2.fastq.gz \
+--out1 "$OutputDir"/"$SampleName"_FastP2_R1.fastq.gz --out2 "$OutputDir"/"$SampleName"_FastP2_R2.fastq.gz \
+--detect_adapter_for_pe -L -q 25 -u 10 \
+--thread 4 --dont_overwrite || exit 1 
+
+# Rename and move the html file
+mv fastp.html "$OutputDir"/"$SampleName"_FastP2.html
+mv fastp.json "$OutputDir"/"$SampleName"_FastP2.json
+
+# Get the number of reads of the second trimmed reads
+R1=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP2.json | sed '5!d')
+R2=$(grep -F total_reads "$OutputDir"/"$SampleName"_FastP2.json | sed '6!d')
+if [ "$R1" = "$R2" ]; then
+    Nr=$(echo "$R1" | tr -d -c 0-9)
+    echo -e "Trimmed2 $Nr" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+else
+    echo -e "Error: The trimmed2 Read 1 & 2 have different number of reads, process stopped."
+    exit 1
+fi
+
+#------------------------------------------------------------------------------------ Clean up
+# Delete temporary directory
+cd ..
+rm -r "$OutputDir"/"$SampleName"
+
+# Delete files from trimming round 1
+rm "$OutputDir"/"$SampleName"_FastP1_R1.fastq.gz
+rm "$OutputDir"/"$SampleName"_FastP1_R2.fastq.gz 
+```
+
+## 02 Paired-end reads to contigs  
+
+Next we assembled our paired-end reads into contigs using [Mothur](https://mothur.org/) v. 1.48.0.  
+
+```{bash, eval=F}
+#!/bin/bash -l
+# Define sample name, names of read 1 and read 2
+SampleName=NameOfSample
+Read1="$SampleName"_FastP2_R1.fastq.gz
+Read2="$SampleName"_FastP2_R2.fastq.gz
+
+# Define your working, input and output directory 
+InputDir=/path/to/input/directory/NameOfInputDirectory
+OutputDir=/path/to/output/directory/NameOfOutputDirectory
+
+#---------------------------------------- Test if files exist and if they have the same length
+# Test if forward and reserve reads exist
+# If they exist, decompress files as mothur needs boost to handle gz files
+if test ! -f "$InputDir/$Read1"; then
+    echo -e "Error: The file for read 1 ("$Read1") is not found in the input directory ($InputDir), " \
+            "proccessed stopped." 
+    exit 1
+else 
+    gzip -cd "$InputDir/$Read1" > "$InputDir"/"$SampleName"_Trimmed_R1.fastq
+fi
+if test ! -f "$InputDir/$Read2"; then
+    echo -e "Error: The file for read 2 ("$Read2") is not found in the input directory ($InputDir), "\
+            "proccessed stopped."
+    exit 1
+else 
+    gzip -cd "$InputDir/$Read2" > "$InputDir"/"$SampleName"_Trimmed_R2.fastq
+fi
+
+#------------------------------------------------------------------------ Mothur: make contigs
+# Quality check
+echo -e "set.dir(input=$InputDir/)\n"\
+"make.contigs(ffastq=$InputDir/${SampleName}_Trimmed_R1.fastq, " \
+"rfastq=$InputDir/${SampleName}_Trimmed_R2.fastq, processors=16, checkorient=T)\n"\
+"set.logfile(name=$InputDir/MothurLogfile_Summary_$SampleName.log)\n"\
+"summary.seqs(fasta=$InputDir/${SampleName}_Trimmed_R1.trim.contigs.fasta, processors=16)\n"\
+"set.logfile(name=$InputDir/MothurLogfile_SummaryReport_$SampleName.log)\n"\
+"summary.seqs(contigsreport=$InputDir/${SampleName}_Trimmed_R1.contigs_report, processors=16)\n"\
+"quit()" > "$InputDir/mothur_contigs_$SampleName.txt"
+mothur "$InputDir/mothur_contigs_$SampleName.txt" || exit 1
+
+# Check for good and bad contigs
+good=$(grep -c \> "$InputDir"/"$SampleName"_Trimmed_R1.trim.contigs.fasta)
+bad=$(grep -c \> "$InputDir"/"$SampleName"_Trimmed_R1.scrap.contigs.fasta)
+echo -e "AssembledContigs $good" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+echo -e "UnassembledContigs $bad" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+
+# Get summary of contigs
+head -19 "$InputDir/MothurLogfile_Summary_$SampleName.log" | tail -11 \
+| tee "$OutputDir/MothurLogfile_Contigs_$SampleName.log"
+head -19 "$InputDir/MothurLogfile_SummaryReport_$SampleName.log" | tail -11 \
+| tee -a "$OutputDir/MothurLogfile_Contigs_$SampleName.log"
+
+#------------------------------------------------------------------------------------ Clean up
+# Move files to output directory
+mv "$InputDir"/"$SampleName"_Trimmed_R1.contigs_report "$OutputDir/$SampleName.contigs_report"
+mv "$InputDir"/"$SampleName"_Trimmed_R1.trim.contigs.fasta "$OutputDir/$SampleName.trim.contigs.fasta"
+
+# Remove unused files
+rm "$InputDir/MothurLogfile_Summary_$SampleName.log"
+rm "$InputDir/MothurLogfile_SummaryReport_$SampleName.log"
+rm "$InputDir/mothur_contigs_$SampleName.txt"
+rm "$InputDir"/"$SampleName"_Trimmed_R1.scrap.contigs.fasta
+rm "$InputDir"/"$SampleName"_Trimmed_R1.trim.contigs.summary
+
+# Remove decompressed input files
+rm "$InputDir"/"$SampleName"_Trimmed_R1.fastq
+rm "$InputDir"/"$SampleName"_Trimmed_R2.fastq
+```
+
+## 03 Screen contigs  
+
+Wer filtered all contigs for a minimum contig length of 100 bp without ambiguities or mismatches and a minimum overlap of 10 bases. 
+
+```{bash, eval = F}
+#!/bin/bash -l
+# Define sample name and names of the contig file and report
+SampleName=NameOfSample
+ContigFile="$SampleName.trim.contigs.fasta"
+ContigReport="$SampleName.contigs_report"
+
+# Define your working, input and output directory 
+InputDir=/path/to/input/directory/NameOfInputDirectory
+OutputDir=/path/to/output/directory/NameOfOutputDirectory
+
+#---------------------------------------------------------------- Test if required files exist
+# Test if input files exist
+if test ! -f "$InputDir/$ContigFile"; then
+    echo -e "Error: The contig file ($InputDir/$ContigFile) is not found " \
+            "in the input directory ($InputDir), proccessed stopped." 
+    exit 1
+fi
+if test ! -f "$$InputDir/$ContigReport"; then
+    echo -e "Error: The contig report file ($InputDir/$ContigReport) is not found " \
+            "in the input directory ($InputDir), proccessed stopped."
+    exit 1
+fi
+
+#-------------------------------------------------------------------- Mothur: screen sequences
+# Quality screen
+echo -e "screen.seqs(fasta=$InputDir/$ContigFile, contigsreport=$$InputDir/$ContigReport, "\
+"minoverlap=10, minlength=100, maxambig=0, mismatches=0, processors=1)\n"\
+"set.logfile(name=$InputDir/MothurLogfile_Summary_$SampleName.log)\n"\
+"summary.seqs(fasta=$InputDir/$SampleName.trim.contigs.good.fasta, processors=1)\n"\
+"quit()" > "$InputDir/mothur_screen_$SampleName.txt"
+mothur "$InputDir/mothur_screen_$SampleName.txt" || exit 1
+
+# Check for good and bad contigs
+good=$(grep -c \> "$InputDir/$SampleName.trim.contigs.good.fasta")
+bad=$(sed -n '$=' "$InputDir/$SampleName.trim.contigs.bad.accnos")
+echo -e "GoodContigs $good" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+echo -e "BadContigs $bad" >> "$OutputDir"/"$SampleName"_NumberOfReads.txt
+
+#------------------------------------------------------------------------------------ Clean up
+# Move files to output directory
+mv "$InputDir/$SampleName.trim.contigs.good.fasta" "$OutputDir/$SampleName.trim.contigs.good.fasta"
+mv "$InputDir/MothurLogfile_Summary_$SampleName.log" "$OutputDir/MothurLogfile_Summary_$SampleName.log"
+
+# Remove unused files
+rm "$InputDir/mothur_screen_$SampleName.txt"
+rm "$InputDir/$SampleName.trim.contigs.good.summary"
+rm "$InputDir/$SampleName.trim.contigs.bad.accnos"
+rm "$InputDir/$SampleName.good.[extension]"
+```
+
+## 04 Taxonomic assignment 
+We blasted our sequences against the [SILVA 138 SSU Ref Nr. 99 database](https://www.arb-silva.de/documentation/release-138/) for the prokaryotes and the [PR<sup>2</sup> database v. 4.14.0](https://pr2-database.org/) for the eukaryotes.
+
+```{bash, eval = F}
+#!/bin/bash -l
+# Define sample name and the name of the input and output file and the path to and name of the database
+SampleName=NameOfSample
+InputFile="$SampleName.trim.contigs.good.fasta"
+OutputFile="$SampleName.PR2.txt" # or .SILVA.txt
+Database=/path/to/database/NameOfDatabase
+
+# Define your working, input and output directory 
+InputDir=/path/to/input/directory/NameOfInputDirectory
+OutputDir=/path/to/output/directory/NameOfOutputDirectory
+
+#------------------------------------------------------------------ Test if needed files exist
+# Test if input files exist
+if test ! -f "$I$InputDir/$InputFile"; then
+    echo -e "Error: The input file ($InputDir/$InputFile) is not found "\
+            "in the input directory ($InputDir), proccessed stopped." 
+    exit 1
+fi
+
+#--------------------------------------------------------------------------------------- Blast
+# Blast
+blastn -db "$Database" -query "$InputDir/$InputFile" -evalue 1e-50 -out "$OutputDir/$OutputFile" \
+-num_threads 4 -outfmt "6 qseqid qlen sacc bitscore evalue length nident pident" -max_target_seqs 1 || exit 1
+```
+
+
+## 05 Create count tables 
+
+We created count tables from the blast files. Thereby, we filtered for a similarity threshold of &ge; 85 % and summarized our counts at the genus level. For this step, we used R and a self-written function that is stored in the directory [Functions](/Functions).
+
+
+**R version:** 4.3.1 (2023-06-16), Beagle Scouts
+**Packages**
+
+* dplyr v. 1.1.4  
+* tidyr v. 1.3.1  
+
+```{r, eval=FALSE}
+# Install packages
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("tidyr")) install.packages("tidyr")
+```
+
+```{r, eval = F}
+# Define sample name and the name of the input file, and the name of the database
+SampleName="NameOfSample"
+InputFile=paste0(SampleName, ".PR2.txt") # or .SILVA.txt"
+Database="PR2"
+
+# Define your working, input and output directory 
+InputDir="/path/to/input/directory/NameOfInputDirectory"
+OutputDir="/path/to/output/directory/NameOfOutputDirectory"
+
+# Load R function
+source("BlastToCount.R")
+
+# Create count table -------------------------------------------------------------------------
+# Differ between SILVA and PR2
+if(Database=="PR2"){
+  tax.colnames=c("AccessionID", "SSU_Sequence", "Organelle", "Strain", "Super_Domain",
+                 "Domain", "Phylum", "Class", "Order",
+                 "Family", "Genus", "Species")
+  summarise.by=c("Super_Domain","Domain","Phylum","Class","Order", "Family","Genus")
+} else if (DB=="SILVA"){
+  tax.colnames=c("AccessionID", "Domain", "Phylum", "Class", "Order",
+                 "Family", "Genus", "Species")
+  summarise.by=c("Domain","Phylum","Class","Order", "Family","Genus")
+}
+
+# Create count table
+result <- 
+    BlastToCount(name=paste0(InputFile, "/", SampleName), filter=list(pident=list('l',85)),
+                 colnames=c("qseqid", "qlen", "sacc", "bitscore", "evalue", "length", "nident", "pident"),
+                 tax.sep="\\|", tax.colnames=tax.colnames, summarise.by=summarise.by)
+
+# Count table 
+Counts <- result[[1]]
+Counts[is.na(Counts)] <- ""
+
+# Rename last column
+colnames(Counts)[colnames(Counts) == "n"] <- SampleName
+
+# Save count data as csv 
+write.table(Counts, paste0(OutputDir, "/", SampleName, "_", Database, "_Counts.txt"), 
+            sep = "\t", dec = ".", col.names = T, row.names = F, quote = F)
+
+# Summaries the number of filtered taxa per filter step --------------------------------------
+FilteredTaxa <- result[[2]]
+FilteredTaxa$Samples <- SampleName
+
+# Save data as csv 
+write.table(FilteredTaxa, paste0(OutputDir, "/", SampleName, "_" Database, "_FilteredTaxa.csv"), 
+            sep = ";", dec = ".", col.names = T, row.names = F)
+
+# Summaries the blast information ------------------------------------------------------------
+stats <- result[[3]]
+stats$Samples <- SampleName
+
+# Save count data as csv 
+write.table(stats, paste0(OutputDir, "/", SampleName, "_" Database, "_BlastInformation.csv"), 
+            sep = ";", dec = ".", col.names = T, row.names = F)
+```
+
+Finally, we merge all count tables from all 15 bark samples for PR<sup>2</sup> und SILVA database respectively.
+
+```{r, eval = F}
+# Define the name of the database
+Database="PR2"
+
+# Define your working, input and output directory 
+InputDir="/path/to/input/directory/NameOfInputDirectory"
+OutputDir="/path/to/output/directory/NameOfOutputDirectory"
+
+# Create a vector with the file names of blast files
+Filenames <- list.files(InputDir, pattern=paste0(".*", Database, "_Counts.txt"), full.names=T)
+
+# Create open count table
+if(Database=="PR2"){
+  counts <- setNames(data.frame(matrix(ncol = 7, nrow = 0)), 
+                     c("Super_Domain","Domain","Phylum","Class","Order","Family","Genus"))
+} else if (Database=="SILVA"){
+  counts <- setNames(data.frame(matrix(ncol = 6, nrow = 0)), 
+                     c("Domain","Phylum","Class","Order","Family","Genus"))
+}
+
+# Iterate over all filenames and merge count tables
+for (i in seq(Filenames)) {
+    counts <- merge(counts, read.table(Filenames[i], sep = "\t", header = T), all = T)
+}
+
+# Replace NAs
+counts[is.na(counts)] <- 0
+
+# Save count data as csv 
+write.table(counts, paste0(OutputDir, "/", Database, "CountTable.txt"), 
+            sep = "\t", dec = ".", col.names = T, row.names = F, quote = F)
+```

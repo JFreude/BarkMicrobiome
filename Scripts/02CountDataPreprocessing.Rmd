@@ -1,0 +1,360 @@
+---
+title: "Count data preprocessing"  
+author: "Jule Freudenthal"  
+date: "`r Sys.Date()`"  
+output: github_document
+always_allow_html: yes
+---
+```{r setup, include=FALSE}
+# Install packages
+if (!require("knitr")) install.packages("knitr")
+if (!require("rprojroot")) install.packages("rprojroot")
+
+# Set global options
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set global working directory
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+**R version:** 4.3.1 (2023-06-16), Beagle Scouts  
+**Packages**  
+
+* dplyr v. 1.1.4  
+* tidyr v. 1.3.1  
+
+```{r, message=FALSE, warning=FALSE}
+# Install packages
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("tidyr")) install.packages("tidyr")
+
+# Load packages
+library(dplyr)
+library(tidyr)
+```
+
+## 01Combine PR<sup>2</sup> and SILVA tables
+
+First, we adjusted some taxonomic information. 
+
+### 01.1 PR<sup>2</sup> 
+```{r, echo=FALSE, results='hide'}
+# Create new directory for the count data
+if(!file.exists("Data/PreprocessedData")){dir.create("Data/PreprocessedData")}
+```
+
+```{r, message=FALSE}
+# Load PR2 data
+PR2=read.csv("Data/OriginalData/PR2CountTable.txt", header = TRUE, sep = "\t", dec = ".")
+
+# Delete Filosa from Cercozoa
+PR2$Class <- sub("^Filosa-","", PR2$Class)
+PR2$Order <- sub("^Filosa-","", PR2$Order)
+PR2$Family <- sub("^Filosa-","", PR2$Family)
+PR2$Genus <- sub("^Filosa-","", PR2$Genus)
+
+# Delete numbers from genera
+PR2[grepl("[a-z][1-9]$|[a-z][1-9][1-9]$", PR2$Genus) &
+      !grepl("clade", PR2$Genus) &
+      !grepl("Sarcocystidae1", PR2$Genus),"Genus"] <- 
+  sub("[1-9]$|[1-9][1-9]$","",
+      PR2[grepl("[a-z][1-9]$|[a-z][1-9][1-9]$", PR2$Genus) &
+            !grepl("clade", PR2$Genus) &
+            !grepl("Sarcocystidae1", PR2$Genus),"Genus"])
+PR2[grepl("_[1-9]$", PR2$Genus) &
+      !grepl("Labyrinthulaceae_ANT10_3", PR2$Genus),"Genus"] <-
+  sub("_[1-9]$", "", PR2[grepl("_[1-9]$|_[1-9][1-9]$", PR2$Genus) &
+                           !grepl("Labyrinthulaceae_ANT10_3", PR2$Genus),"Genus"])
+PR2[grepl("Babesia",PR2$Genus),"Genus"] <- "Babesia"
+PR2[grepl("Sarcocystis",PR2$Genus),"Genus"] <- "Sarcocystis"
+PR2[grepl("Cryptosporidium",PR2$Genus),"Genus"] <- "Cryptosporidium"
+PR2[grepl("Piroplasmorida1",PR2$Genus),"Genus"] <- "Piroplasmorida1_X"
+PR2[grepl("Piroplasmorida6",PR2$Genus),"Genus"] <- "Piroplasmorida6_X"
+
+# Fix some taxonomic ranks
+PR2[PR2$Genus %in% c("Arcuospathidium", "Epispathidium", "Spathidium"),"Order"] <- "Litostomatea_X"
+PR2[PR2$Genus %in% c("Arcuospathidium", "Epispathidium", "Spathidium"),"Family"] <- "Litostomatea_XX"
+PR2[PR2$Genus == "Balantidium","Family"] <- "Trichostomatia_X"
+PR2[PR2$Genus == "Cyclidium","Order"] <- "Oligohymenophorea_X"
+PR2[PR2$Genus == "Cyclidium","Family"] <- "Oligohymenophorea_XX"
+PR2[PR2$Genus == "Frontonia","Family"] <- "Peniculia_X"
+PR2[PR2$Genus == "Zoothamnium","Family"] <- "Peritrichia_2_X"
+PR2[PR2$Genus == "Physarum","Family"] <- "Physaraceae"
+PR2[PR2$Genus == "Pleuronema","Family"] <- "Scuticociliatia_2_X"
+
+# Summarise data by genus
+PR2 <- data.frame(PR2 %>% mutate_if(is.factor, as.character))
+PR2 <- data.frame(PR2 %>% 
+                    group_by(across(where(is.character))) %>% 
+                    summarise(across(everything(), sum)))
+```
+
+### 01.2 SILVA  
+
+```{r, message=FALSE}
+# Load SILVA data
+SILVA=read.csv("Data/OriginalData/SILVACountTable.txt", header = TRUE, sep = "\t", dec = ".")
+
+# Replace NAs
+SILVA[is.na(SILVA)] <- ""
+
+# Replace uncultured taxa
+for(i in 2:6){
+  
+  # Get names
+  OrigName <- colnames(SILVA)[i]
+  
+  # Get indices
+  indices <- 
+    grep("uncultured$|uncultured_actinobacterium$|uncultured_actinomycete$|
+          |uncultured_alga$|uncultured_anaerobic_ammonium-oxidizing_bacterium$|
+          |uncultured_anaerobic_bacterium$|uncultured_archaeon$|
+          |uncultured_bacterium$|uncultured_beta_proteobacterium$|
+          |uncultured_compost_bacterium$|uncultured_crenarchaeote$|
+          |uncultured_cyanobacterium$|uncultured_Cyanobacterium_sp$|
+          |uncultured_deep-sea_bacterium$|uncultured_delta_proteobacterium$|
+          |uncultured_diatom$|uncultured_endolithic_bacterium$|
+          |uncultured_eukaryote$|uncultured_forest_soil_bacterium$|
+          |uncultured_gamma_proteobacterium$|uncultured_haloalkaliphilic_bacterium$|
+          |uncultured_iron-reducing_bacterium$|uncultured_marine_bacterium$|
+          |uncultured_marine_cyanobacterium$|uncultured_marine_eukaryote$|
+          |uncultured_marine_microorganism$|uncultured_marine_rappemonad$|
+          |uncultured_methanogenic_archaeon$|uncultured_microorganism$|
+          |uncultured_organism$|uncultured_phototrophic_eukaryote$|
+          |uncultured_planctomycete$|uncultured_prokaryote$|
+          |uncultured_proteobacterium$|uncultured_rumen_bacterium$|
+          |uncultured_sludge_bacterium$|uncultured_soil_archaeon$|
+          |uncultured_soil_bacterium$|uncultured_sediment_bacterium$|
+          |uncultured_sulfur-oxidizing_symbiont_bacterium$|
+          |uncultured_thaumarchaeote$|uncultured_thermal_soil_bacterium$", SILVA[,OrigName])
+  
+  # Get names of high taxonomic level
+  NewName <- colnames(SILVA)[i-1]
+  SILVA[indices,OrigName] <- ifelse(grepl("_X+$", SILVA[indices,NewName]),
+                                    paste0(SILVA[indices,NewName], "X"),
+                                    paste0(SILVA[indices,NewName], "_X"))
+}
+
+# Replace empty columns
+for(i in 2:6){
+  
+  # Get names
+  OrigName <- colnames(SILVA)[i]
+  
+  # Get indices
+  indices <- which(SILVA[,OrigName]=="")
+  
+  # Get names of high taxonomic level
+  NewName <- colnames(SILVA)[i-1]
+  SILVA[indices,OrigName] <- ifelse(grepl("_X+$", SILVA[indices,NewName]),
+                                    paste0(SILVA[indices,NewName], "X"),
+                                    paste0(SILVA[indices,NewName], "_X"))
+}
+
+# Summarise by genus
+SILVA <- data.frame(SILVA %>% mutate_if(is.factor, as.character))
+SILVA <- data.frame(SILVA %>% 
+                      group_by(across(where(is.character))) %>% 
+                      summarise(across(everything(), sum)))
+```
+
+### 01.3 Filter data to exclude cholorplast sequences, land plants and macroscopic animals
+
+We filtered for putative contaminants, such as sequences derived from macroscopic animals and land plants (Embryophyceae). Further, we exclude chloroplast sequences from the data set.
+
+```{r}
+# Exclude cholorplast sequences from SILVA data
+SILVA <- SILVA[SILVA$Order != "Chloroplast",]
+
+# Filter to exclude land plants non microscopic metazoa
+PR2 <- PR2[PR2$Class != "Embryophyceae",]
+
+# Filter to exclude non microscopic metazoa
+PR2 <- 
+  PR2[!(PR2$Phylum == "Metazoa" & 
+          (!PR2$Class %in% c("Gastrotricha", "Nematoda", "Rotifera", "Tardigrada"))),]
+```
+
+### 01.4 Combine tables  
+
+We combine the PR<sup>2</sup> and SILVA data and assign a new column differentiating between Prokaryota, Algae, heterotrophic Protists, Fungi and Microscopic Metazoa. Further, we create one table for count-, meta- and taxonomy data respectively. We transform the data so that for  
+
+1. **Count data** one row contains all information to one taxon for each sample. Column names must be sample-IDs and row names taxa-IDs.  
+2. **Metadata** One column per metadata factor providing information for each sample. Column names are factors, row names are sample-IDs.  
+3. **Taxonomy** Each column is one taxonomic rank, providing the classification of each taxon. Column names are taxonomic ranks, row names are taxa-IDs. 
+
+```{r}
+# Add a new column 'Super_Domain' to the Silva data
+SILVA$Super_Domain <- "Prokaryota"
+
+#------------ Add a column 'MicrobialCommunity'
+# Prokaryota
+SILVA$MicrobialCommunity <- "Prokaryota"
+
+# Heterotrophic Protists
+PR2$MicrobialCommunity <- "Heterotrophic Protists"
+
+# Algae
+PR2[PR2$Domain == "Archaeplastida" & PR2$Phylum %in% 
+      c("Chlorophyta", "Glaucophyta", "Prasinodermophyta", "Rhodophyta"),
+    "MicrobialCommunity"] <- "Algae"
+PR2[PR2$Phylum == "Streptophyta" & PR2$Class %in% 
+      c("Charophyceae", "Chlorokybophyceae", "Coleochaetophyceae", "Klebsormidiophyceae", 
+        "Mesostigmatophyceae", "Zygnemophyceae"), "MicrobialCommunity"] <- "Algae"
+PR2[PR2$Domain == "Hacrobia" & PR2$Phylum %in% 
+      c("Cryptophyta", "Haptophyta"), "MicrobialCommunity"] <- "Algae"
+PR2[PR2$Phylum == "Ochrophyta", "MicrobialCommunity"] <- "Algae"
+PR2[PR2$Order == "Euglenophyceae", "MicrobialCommunity"] <- "Algae"
+PR2[PR2$Genus %in% c("Vitrella", "Chromera", "Paulinella"), "MicrobialCommunity"] <- "Algae"
+
+# Microscopic Metazoa
+PR2[PR2$Phylum=="Metazoa","MicrobialCommunity"] <- "Microscopic Metazoa"
+
+# Fungi
+PR2[PR2$Phylum=="Fungi","MicrobialCommunity"] <- "Fungi"
+
+# Eukaryota_X
+PR2[PR2$Domain=="Eukaryota_X","MicrobialCommunity"] <- "Eukaryota_X"
+
+# Combine both tables
+CountData <- rbind(PR2, SILVA)
+
+# Shorten column names
+colnames(CountData) <- sub("Tilia_CanopyBark_0", "TB", 
+                           sub("Quercus_CanopyBark_0", "QB", 
+                               sub("Acer_CanopyBark_0", "AB", colnames(CountData))))
+
+# Assign row names
+rownames(CountData) <- paste0("Genus",sprintf('%0.4d', seq(nrow(CountData))))
+
+# Separate data in count and taxonomy data
+CountData <- data.frame(CountData %>% mutate_if(is.factor, as.character))
+counts <- data.frame(select_if(CountData, is.numeric))
+taxonomy <- data.frame(select_if(CountData, is.character))
+
+# Load metadata, shorten Sample IDs and assign Sample ID as row names
+metadata <- read.csv("Data/OriginalData/Metadata.txt", header = TRUE, sep = "\t", dec = ".")
+metadata$SampleID <- sub("Tilia_CanopyBark_0", "TB", 
+                         sub("Quercus_CanopyBark_0", "QB", 
+                             sub("Acer_CanopyBark_0", "AB", metadata$SampleID)))
+rownames(metadata) <- metadata$SampleID
+
+# Check if corresponding row and column names match, else save tables as Data
+if(!all(identical(colnames(counts), rownames(metadata)), identical(rownames(counts), rownames(taxonomy)))){
+  stop("Corresponding row and column names must match")
+} else {
+  # Save files
+  save(counts, metadata, taxonomy, file = "Data/PreprocessedData/01CanopyBarkData.rds")
+}
+```
+```{r, echo=FALSE, results='hide'}
+# Clear console and workspace
+cat("\014") 
+rm(list=ls())
+```
+
+## 02 Filter for low abundant data
+
+We exclude genera with proportional reads below 0.001 % across all samples. 
+
+```{r, results='hold'}
+# Load RNA count- and meta- and taxonomy data
+load("Data/PreprocessedData/01CanopyBarkData.rds")
+
+# Filter for most abundant
+filter <- 0.00001
+print(paste0(sum(rowSums(counts) >= sum(counts)*filter), " out of ", nrow(counts), 
+             " genera are kept for further analysis. Only ",
+             (sum(counts)-sum(counts[rowSums(counts) >= 
+                                       sum(counts)*filter,]))/sum(counts)*100 ,
+             "% of the reads are excluded."))
+counts <- counts[rowSums(counts) >= sum(counts)*filter,]
+
+# Adjust taxonomy
+taxonomy <- taxonomy[rownames(taxonomy) %in% rownames(counts),]
+
+# Check if corresponding row and column names match, else save tables as Data
+if(!all(identical(colnames(counts), rownames(metadata)), 
+        identical(rownames(counts), rownames(taxonomy)))){
+  stop("Corresponding row and column names must match")
+} else {
+  rownames(taxonomy) <- paste0("Genus",sprintf('%0.4d', seq(nrow(taxonomy))))
+  rownames(counts) <- rownames(taxonomy)
+  save(counts, metadata, taxonomy, 
+       file = "Data/PreprocessedData/02CanopyBarkDataFiltered.rds")
+}
+
+```
+```{r, echo=FALSE, results='hide'}
+# Clear console and workspace
+cat("\014") 
+rm(list=ls())
+```
+
+## 02 Assign Traits
+
+We assign functional traits to the taxa identified, using published reference databases. Fungi were classified into functional groups (lichen-forming fungi, (facultative) yeasts, and plant parasites) according to [Nguyen et al., 2016](http://www.scopus.com/inward/record.url?scp=84959902395&partnerID=8YFLogxK).
+Algae were classifiedaccording to [Sanders & Masumoto, 2021](https://www.cambridge.org/core/journals/lichenologist/article/lichen-algae-the-photosynthetic-partners-in-lichen-symbioses/A4808B98986967A742EF0DCFF187A937) as lichen-forming algae. 
+
+```{r}
+# Load RNA count- and meta- and taxonomy data
+load("Data/PreprocessedData/02CanopyBarkDataFiltered.rds")
+
+# Assign Genus ID as column
+taxonomy$ID <- rownames(taxonomy)
+
+#------------- Fungi
+# Load fungi traits
+fungi <- read.table("Data/OriginalData/Traits/Fungi.txt", sep = "\t", header = T)
+
+# Separate taxonomy
+fungi <- fungi %>% separate(taxonomy,c("Class", "Order", "Family", "Genus"), sep = ";")
+
+# Merge with taxonomy
+fungi <- 
+  merge(taxonomy[taxonomy$MicrobialCommunity=="Fungi",],
+        fungi[,c("Class", "Order", "Family", "Genus", "Feeding", "Lifestyle", "Growth.Morphology")], 
+        all.x = T, all.y = F)
+
+# Keep only traits for lichen, pathogenes and growth morphology
+fungi[!fungi$Lifestyle %in% c("Lichenized", "Plant Pathogen"),"Lifestyle"] <- NA
+fungi[is.na(fungi$Growth.Morphology) | fungi$Growth.Morphology == "NULL","Growth.Morphology"] <- NA
+
+# Assign a column for lichen
+fungi$Lichen[fungi$Lifestyle == "Lichenized"] <- "Mycobiont"
+
+# Merge with taxonomy
+taxonomy <- merge(taxonomy[taxonomy$MicrobialCommunity!="Fungi",], fungi, all=T)
+
+#------------- Photobionts
+# Load photobionts traits
+photobionts <- read.table("Data/OriginalData/Traits/Photobionts.txt", sep = "\t", header = T)
+
+# Merge with taxonomy
+photobionts <- 
+  merge(taxonomy[taxonomy$MicrobialCommunity == "Algae" | taxonomy$Phylum == "Cyanobacteria",
+                 c("Super_Domain", "Domain", "Genus", "ID")], photobionts, all = F)
+
+# Merge with taxonomy table
+taxonomy$Lichen[taxonomy$ID %in% photobionts$ID] <- "Photobiont"
+
+# Assign ID as rownames
+rownames(taxonomy) <- taxonomy$ID
+taxonomy$ID <- NULL
+
+# Check if corresponding row and column names match, else save tables as Data
+taxonomy <- taxonomy[match(rownames(counts),rownames(taxonomy)),]
+if(!all(identical(colnames(counts), rownames(metadata)), 
+        identical(rownames(counts), rownames(taxonomy)))){
+  stop("Corresponding row and column names must match")
+} else {
+  # Save files
+  save(counts, metadata, taxonomy, file = "Data/PreprocessedData/03CanopyBarkDataTraitsFiltered.rds")
+}
+```
+```{r, echo=FALSE, results='hide'}
+# Clear console and workspace
+cat("\014") 
+rm(list=ls())
+```
+

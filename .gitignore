@@ -1,0 +1,20 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Unused Scripts
+Scripts/Original
+
+# Results & Databases
+Results
+Databases
+
+# Data
+Data/UploadNCBI
+Data/PreprocessedData
+Data/OtherPaper
+Data/NetworkData
+Data/OriginalData/PR2CountTable.txt
+Data/OriginalData/SILVACountTable.txt
+Data/OriginalData/Traits/NotUsed

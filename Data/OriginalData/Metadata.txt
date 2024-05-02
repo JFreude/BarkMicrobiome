@@ -1,0 +1,16 @@
+TreeSpecies	Region	Microhabitat	Height	Replicate	TreeID	SampleID	TotalHightTree	BHD	Area
+Acer pseudoplatanus	Canopy	Bark	21.5	1	33	Acer_CanopyBark_01	28.1	55.4	101647.0209
+Acer pseudoplatanus	Canopy	Bark	22	2	84	Acer_CanopyBark_02	28	45.1	76411.89704
+Acer pseudoplatanus	Canopy	Bark	23.35	3	754	Acer_CanopyBark_03	32.3	70	154320.0683
+Acer pseudoplatanus	Canopy	Bark	26.5	4	749	Acer_CanopyBark_04	35.2	49.4	101369.0609
+Acer pseudoplatanus	Canopy	Bark	23.9	5	346	Acer_CanopyBark_05	35.2	61.4	136709.9597
+Quercus robur	Canopy	Bark	27.2	1	129	Quercus_CanopyBark_01	35.8	133.7	455641.193
+Quercus robur	Canopy	Bark	26.5	2	131	Quercus_CanopyBark_02	34.9	100.8	303596.7704
+Quercus robur	Canopy	Bark	20	3	86	Quercus_CanopyBark_03	28	32.1	54074.69581
+Quercus robur	Canopy	Bark	24.5	4	733	Quercus_CanopyBark_04	30	53.6	114774.6624
+Quercus robur	Canopy	Bark	20	5	317	Quercus_CanopyBark_05	37	86.5	256071.2168
+Tilia cordata	Canopy	Bark	23.8	2	444	Tilia_CanopyBark_01	29.2	81.5	260851.1496
+Tilia cordata	Canopy	Bark	26.5	3	517	Tilia_CanopyBark_02	30.9	79.9	263906.4955
+Tilia cordata	Canopy	Bark	23.8	4	455	Tilia_CanopyBark_03	34	69.6	233112.5163
+Tilia cordata	Canopy	Bark	14	5	439	Tilia_CanopyBark_04	33.5	75.6	258544.31
+Tilia cordata	Canopy	Bark	NA	6	342	Tilia_CanopyBark_05	33.5	62.9	200761.3949
