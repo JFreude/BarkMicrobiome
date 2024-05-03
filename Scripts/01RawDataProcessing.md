@@ -1,7 +1,7 @@
 Raw FASTQ data to read count tables
 ================
 Jule Freudenthal
-2024-05-02
+2024-05-03
 
 Here we show our workflow for creating count tables from raw Illumina
 data (paired-end sequences, 150bp) originating from 15 canopy bark
@@ -283,7 +283,7 @@ blastn -db "$Database" -query "$InputDir/$InputFile" -evalue 1e-50 -out "$Output
 We created count tables from the blast files. Thereby, we filtered for a
 similarity threshold of ≥ 85 % and summarized our counts at the genus
 level. For this step, we used R and a self-written function that is
-stored in the directory [Functions](/Functions).
+stored in the directory [Functions](Scripts/Functions).
 
 **R version:** 4.3.1 (2023-06-16), Beagle Scouts **Packages**
 
