@@ -3,9 +3,6 @@
 .RData
 .Ruserdata
 
-# Unused Scripts
-Scripts/Original
-
 # Results & Databases
 Results
 Databases
@@ -15,6 +12,16 @@ Data/UploadNCBI
 Data/PreprocessedData
 Data/OtherPaper
 Data/NetworkData
+Data/OriginalData/NCBI
+Data/OriginalData/Traits/NotUsed
 Data/OriginalData/PR2CountTable.txt
 Data/OriginalData/SILVACountTable.txt
-Data/OriginalData/Traits/NotUsed
+
+# Skripts
+Scripts/Functions/NotUsed
+Scripts/linux
+Scripts/NotUsed
+
+# Figures
+Results/Test
+Results/Präsi
